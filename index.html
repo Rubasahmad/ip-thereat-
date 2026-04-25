@@ -26,7 +26,6 @@ h1 {
     color: #0ea5e9;
 }
 
-/* TOP BAR */
 .top-bar {
     display: flex;
     justify-content: center;
@@ -56,7 +55,6 @@ button:hover {
     background: #0284c7;
 }
 
-/* GRID LAYOUT */
 .grid {
     display: grid;
     grid-template-columns: 1fr;
@@ -70,7 +68,6 @@ button:hover {
     gap: 20px;
 }
 
-/* CARD DESIGN */
 .card {
     background: white;
     padding: 20px;
@@ -85,10 +82,8 @@ button:hover {
 
 h3 {
     margin-top: 0;
-    color: #0f172a;
 }
 
-/* MAP & CHART */
 #map {
     height: 320px;
     border-radius: 10px;
@@ -98,7 +93,6 @@ h3 {
     height: 260px !important;
 }
 
-/* BADGES */
 .badge {
     padding: 6px 12px;
     border-radius: 20px;
@@ -110,7 +104,6 @@ h3 {
 .medium { background: #f59e0b; color:white; }
 .high { background: #ef4444; color:white; }
 
-/* LOADER */
 .loader {
     text-align: center;
     margin: 20px;
@@ -135,12 +128,10 @@ h3 {
 
 <div class="grid">
 
-    <!-- RESULT FIRST -->
     <div class="card" id="result">
         Enter an IP or click Detect My IP
     </div>
 
-    <!-- MAP + CHART -->
     <div class="row-2">
         <div class="card">
             <h3>📍 Location Map</h3>
@@ -160,46 +151,56 @@ h3 {
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
 <script>
-const geoApiKey = "YOUR_GEO_API_KEY";
-const abuseApiKey = "YOUR_ABUSE_API_KEY";
+// 🔑 ADD YOUR KEYS HERE
+const geoApiKey = "c019492c73444c75a6c7264e0fdf3562";
+const abuseApiKey = "29e24bd533ee0a2bd6fcdefd9437568c911186ee82efb1379f97e5f76257b1c1ba05ebfd25a197e6";
 
 let map, chart;
 
-// ================= MAP =================
+// MAP
 function initMap(lat=0, lon=0){
     if(map) map.remove();
     map = L.map('map').setView([lat, lon], 2);
-
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
     L.marker([lat, lon]).addTo(map);
 }
 initMap();
 
-// ================= VALIDATION =================
+// VALIDATION
 function isValidIP(ip){
     const parts = ip.split(".");
     return parts.length === 4 && parts.every(p => +p >= 0 && +p <= 255);
 }
 
-// ================= GET MY IP =================
+// GET IP (NO KEY REQUIRED)
 async function getMyIP(){
-    document.getElementById("loader").innerText = "Detecting your IP...";
+    const loader = document.getElementById("loader");
+    loader.innerText = "Detecting your IP...";
 
-    const res = await fetch(`https://api.ipgeolocation.io/ipgeo?apiKey=${geoApiKey}`);
-    const data = await res.json();
+    try {
+        const res = await fetch("https://api.ipify.org?format=json");
+        const data = await res.json();
 
-    document.getElementById("ipInput").value = data.ip;
+        if(!data.ip) throw new Error();
 
-    document.getElementById("loader").innerText = "";
-    checkIP();
+        document.getElementById("ipInput").value = data.ip;
+        loader.innerText = "";
+
+        checkIP();
+
+    } catch {
+        loader.innerText = "";
+        document.getElementById("result").innerHTML =
+            "⚠️ Could not detect IP";
+    }
 }
 
-// ================= MAIN =================
+// MAIN
 async function checkIP(){
     const ip = document.getElementById("ipInput").value.trim();
     const result = document.getElementById("result");
 
-    if(!isValidIP(ip)){
+    if(!ip || !isValidIP(ip)){
         result.innerHTML = "⚠️ Invalid IP address";
         return;
     }
@@ -207,16 +208,21 @@ async function checkIP(){
     document.getElementById("loader").innerText = "Analyzing...";
 
     try{
-        const [geo, threatRes] = await Promise.all([
-            fetch(`https://api.ipgeolocation.io/ipgeo?apiKey=${geoApiKey}&ip=${ip}`).then(r=>r.json()),
-            fetch(`https://api.abuseipdb.com/api/v2/check?ipAddress=${ip}`, {
-                headers: {Key: abuseApiKey, Accept: "application/json"}
-            }).then(r=>r.json())
-        ]);
+        const geoRes = await fetch(`https://api.ipgeolocation.io/ipgeo?apiKey=${geoApiKey}&ip=${ip}`);
+        const geo = await geoRes.json();
+
+        const threatRes = await fetch(`https://api.abuseipdb.com/api/v2/check?ipAddress=${ip}`, {
+            headers: {Key: abuseApiKey, Accept: "application/json"}
+        });
+        const threatData = await threatRes.json();
 
         document.getElementById("loader").innerText = "";
 
-        const threat = threatRes.data;
+        if(!geo.ip || !threatData.data){
+            throw new Error();
+        }
+
+        const threat = threatData.data;
         let score = threat.abuseConfidenceScore;
 
         let level = score > 70 ? "high" : score > 30 ? "medium" : "low";
@@ -231,7 +237,6 @@ async function checkIP(){
 
         result.innerHTML = `
         <h2>🌐 IP Analysis</h2>
-
         <p><b>IP:</b> ${geo.ip}</p>
         <p><b>Location:</b> ${geo.city}, ${geo.country_name}</p>
 
@@ -245,10 +250,8 @@ async function checkIP(){
         <p>🕒 <b>Last Report:</b> ${threat.lastReportedAt || "None"}</p>
         `;
 
-        // MAP UPDATE
         initMap(geo.latitude, geo.longitude);
 
-        // CHART
         if(chart) chart.destroy();
 
         chart = new Chart(document.getElementById("chart"), {
@@ -259,18 +262,12 @@ async function checkIP(){
                     data: [score, 100-score],
                     backgroundColor: ["#ef4444", "#22c55e"]
                 }]
-            },
-            options: {
-                animation: {
-                    animateRotate: true,
-                    duration: 1200
-                }
             }
         });
 
-    }catch(e){
+    }catch{
         document.getElementById("loader").innerText = "";
-        result.innerHTML = "⚠️ Error fetching data";
+        result.innerHTML = "⚠️ Error fetching data (Check API keys)";
     }
 }
 
