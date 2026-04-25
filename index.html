@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cyber Threat Intelligence</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    margin: 0;
+}
+
+.container {
+    max-width: 1100px;
+    margin: auto;
+    padding: 20px;
+}
+
+h1 {
+    text-align: center;
+    color: #38bdf8;
+}
+
+.top-bar {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+input {
+    padding: 10px;
+    border-radius: 8px;
+    border: none;
+    width: 250px;
+}
+
+button {
+    padding: 10px 16px;
+    border-radius: 8px;
+    border: none;
+    background: #38bdf8;
+    color: black;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.card {
+    background: #1e293b;
+    padding: 20px;
+    border-radius: 12px;
+}
+
+#map { height: 300px; border-radius: 10px; }
+
+.badge {
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-weight: bold;
+}
+
+.low { background: #16a34a; }
+.medium { background: #f59e0b; }
+.high { background: #ef4444; }
+
+.loader {
+    text-align: center;
+    margin: 20px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+<h1>🛡 Cyber Threat Intelligence</h1>
+
+<div class="top-bar">
+    <input id="ipInput" placeholder="Enter IP Address">
+    <button onclick="checkIP()">Analyze</button>
+</div>
+
+<div class="loader" id="loader"></div>
+
+<div class="grid">
+    <div class="card" id="result"></div>
+    <div class="card"><div id="map"></div></div>
+    <div class="card">
+        <h3>Threat Overview</h3>
+        <canvas id="chart"></canvas>
+    </div>
+</div>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script>
+const geoKey = "c019492c73444c75a6c7264e0fdf3562";
+const abuseKey = "5ab01b65c2f490e6921044b734503fbc1506fe64c8dd13e2097e95f12448f5149ffef626d4b86811";
+
+let map = L.map('map').setView([0,0], 2);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+let chart;
+
+// ================= VALIDATION =================
+function isValidIP(ip){
+    const parts = ip.split(".");
+    return parts.length === 4 && parts.every(p => +p >= 0 && +p <= 255);
+}
+
+// ================= MAIN =================
+async function checkIP(){
+    const ip = document.getElementById("ipInput").value.trim();
+    const result = document.getElementById("result");
+    const loader = document.getElementById("loader");
+
+    if(!isValidIP(ip)){
+        result.innerHTML = "⚠️ Enter a valid IP";
+        return;
+    }
+
+    loader.innerHTML = "🔍 Analyzing...";
+
+    try{
+        const [geo, threat] = await Promise.all([
+            fetch(`https://api.ipgeolocation.io/ipgeo?apiKey=${geoKey}&ip=${ip}`).then(r=>r.json()),
+            fetch(`https://api.abuseipdb.com/api/v2/check?ipAddress=${ip}`, {
+                headers: {Key: abuseKey, Accept: "application/json"}
+            }).then(r=>r.json())
+        ]);
+
+        loader.innerHTML = "";
+
+        const t = threat.data;
+        let score = t.abuseConfidenceScore;
+
+        let level = score > 70 ? "high" : score > 30 ? "medium" : "low";
+
+        let message = score === 0 
+            ? "No malicious activity reported"
+            : score < 30
+            ? "Low risk IP"
+            : score < 70
+            ? "Suspicious activity detected"
+            : "High risk malicious IP";
+
+        result.innerHTML = `
+        <h2>${geo.ip}</h2>
+        <p>📍 ${geo.city}, ${geo.country_name}</p>
+
+        <h3>Threat Status</h3>
+        <p class="badge ${level}">${message}</p>
+
+        <p><b>Abuse Score:</b> ${score}/100</p>
+        <p><b>Reports:</b> ${t.totalReports}</p>
+        <p><b>Last Seen:</b> ${t.lastReportedAt || "Never"}</p>
+        `;
+
+        // MAP
+        map.setView([geo.latitude, geo.longitude], 8);
+        L.marker([geo.latitude, geo.longitude]).addTo(map);
+
+        // CHART
+        if(chart) chart.destroy();
+
+        chart = new Chart(document.getElementById("chart"), {
+            type: "doughnut",
+            data: {
+                labels: ["Risk", "Safe"],
+                datasets: [{
+                    data: [score, 100-score],
+                    backgroundColor: ["#ef4444", "#16a34a"]
+                }]
+            },
+            options: {
+                animation: {
+                    animateScale: true,
+                    duration: 1500
+                }
+            }
+        });
+
+    }catch(e){
+        loader.innerHTML = "";
+        result.innerHTML = "⚠️ Error loading data";
+    }
+}
+</script>
+
+</body>
+</html>
