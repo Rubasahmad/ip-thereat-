@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cyber Threat Intelligence Dashboard</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    margin: 0;
+}
+
+.container {
+    max-width: 1200px;
+    margin: auto;
+    padding: 20px;
+}
+
+h1 {
+    text-align: center;
+    font-weight: 600;
+    margin-bottom: 20px;
+    color: #38bdf8;
+}
+
+.top-bar {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+input {
+    padding: 10px 15px;
+    border-radius: 8px;
+    border: 1px solid #334155;
+    background: #020617;
+    color: white;
+    width: 250px;
+}
+
+button {
+    padding: 10px 16px;
+    border-radius: 8px;
+    border: none;
+    background: #38bdf8;
+    color: #020617;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+button:hover {
+    background: #0ea5e9;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.card {
+    background: #020617;
+    padding: 20px;
+    border-radius: 12px;
+    border: 1px solid #1e293b;
+    transition: 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-3px);
+    border-color: #38bdf8;
+}
+
+#map {
+    height: 300px;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+canvas {
+    max-height: 300px;
+}
+
+.loader {
+    border: 4px solid #1e293b;
+    border-top: 4px solid #38bdf8;
+    border-radius: 50%;
+    width: 35px;
+    height: 35px;
+    animation: spin 1s linear infinite;
+    margin: 20px auto;
+}
+
+.hidden { display: none; }
+
+.high { color: #ef4444; font-weight: bold; }
+.medium { color: #f59e0b; font-weight: bold; }
+.low { color: #22c55e; font-weight: bold; }
+
+.history-item {
+    display: inline-block;
+    background: #1e293b;
+    padding: 6px 12px;
+    margin: 5px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.history-item:hover {
+    background: #334155;
+}
+
+.progress {
+    height: 10px;
+    border-radius: 10px;
+    background: #1e293b;
+    margin-top: 10px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    transition: 0.5s;
+}
+
+@keyframes spin {
+    100% { transform: rotate(360deg); }
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>🛡 Cyber Threat Intelligence Dashboard</h1>
+
+<div class="top-bar">
+    <button onclick="getMyIP()">📍 Detect My IP</button>
+    <input id="ipInput" placeholder="Enter IP Address">
+    <button onclick="checkIP()">Analyze</button>
+</div>
+
+<div id="loader" class="loader hidden"></div>
+
+<div class="grid">
+
+    <div class="card">
+        <div id="result"></div>
+    </div>
+
+    <div class="card">
+        <div id="map"></div>
+    </div>
+
+    <div class="card">
+        <canvas id="riskChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3>Recent Searches</h3>
+        <div id="history"></div>
+    </div>
+
+</div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script>
+const apiKey = "c019492c73444c75a6c7264e0fdf3562";
+let map, chart;
+
+function initMap(lat=0, lon=0){
+    if(map) map.remove();
+    map = L.map('map').setView([lat, lon], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    L.marker([lat, lon]).addTo(map);
+}
+initMap();
+
+function isValidIP(ip){
+    return /^(25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\./.test(ip);
+}
+
+async function getMyIP(){
+    const res = await fetch(`https://api.ipgeolocation.io/ipgeo?apiKey=${apiKey}`);
+    const data = await res.json();
+    document.getElementById("ipInput").value = data.ip;
+    checkIP();
+}
+
+async function checkIP(){
+    const ip = document.getElementById("ipInput").value;
+    const result = document.getElementById("result");
+    const loader = document.getElementById("loader");
+
+    if(!isValidIP(ip)){
+        result.innerHTML = "Invalid IP format";
+        return;
+    }
+
+    loader.classList.remove("hidden");
+    result.innerHTML = "";
+
+    try{
+        const res = await fetch(`https://api.ipgeolocation.io/ipgeo?apiKey=${apiKey}&ip=${ip}`);
+        const data = await res.json();
+        loader.classList.add("hidden");
+
+        let risk = 0;
+        let vpn = data.isp?.toLowerCase().includes("vpn") ? 1 : 0;
+        let hosting = data.organization?.toLowerCase().includes("hosting") ? 1 : 0;
+
+        if(vpn) risk += 40;
+        if(hosting) risk += 30;
+
+        let level = "low";
+        if(risk > 50) level = "high";
+        else if(risk > 20) level = "medium";
+
+        let barColor = level === "high" ? "#ef4444" :
+                       level === "medium" ? "#f59e0b" : "#22c55e";
+
+        result.innerHTML = `
+        <h3>IP Intelligence</h3>
+        <p><b>${data.ip}</b></p>
+        <p>${data.city}, ${data.country_name}</p>
+        <p>${data.isp}</p>
+        <p class="${level}">Risk Score: ${risk} (${level})</p>
+
+        <div class="progress">
+            <div class="progress-bar" style="width:${risk}%; background:${barColor};"></div>
+        </div>
+
+        <img src="https://flagsapi.com/${data.country_code2}/flat/32.png">
+        <br><br>
+        <button onclick="copyIP('${data.ip}')">Copy IP</button>
+        `;
+
+        initMap(parseFloat(data.latitude), parseFloat(data.longitude));
+        updateChart(vpn, hosting);
+        saveHistory(ip);
+
+    }catch(e){
+        loader.classList.add("hidden");
+        result.innerHTML = "API Error";
+    }
+}
+
+function updateChart(vpn, hosting){
+    const ctx = document.getElementById('riskChart');
+    if(chart) chart.destroy();
+
+    chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['VPN', 'Hosting'],
+            datasets: [{
+                data: [vpn, hosting]
+            }]
+        },
+        options: {
+            plugins: {
+                legend: { display: false }
+            }
+        }
+    });
+}
+
+function copyIP(ip){
+    navigator.clipboard.writeText(ip);
+    alert("IP Copied!");
+}
+
+function saveHistory(ip){
+    let h = JSON.parse(localStorage.getItem("h")) || [];
+    if(!h.includes(ip)) h.unshift(ip);
+    if(h.length > 5) h.pop();
+    localStorage.setItem("h", JSON.stringify(h));
+    renderHistory();
+}
+
+function renderHistory(){
+    const list = document.getElementById("history");
+    let h = JSON.parse(localStorage.getItem("h")) || [];
+
+    list.innerHTML = "";
+
+    h.forEach(ip => {
+        let span = document.createElement("span");
+        span.className = "history-item";
+        span.textContent = ip;
+        span.onclick = () => {
+            document.getElementById("ipInput").value = ip;
+            checkIP();
+        };
+        list.appendChild(span);
+    });
+}
+
+renderHistory();
+</script>
+
+</body>
+</html>
